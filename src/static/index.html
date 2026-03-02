@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SuryaMandal — Solar System</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #000;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+    }
+
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+    }
+
+    /* ── top bar ── */
+    #topbar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 18px;
+      background: rgba(0,0,0,0.65);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    #topbar h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: #ffd700;
+      white-space: nowrap;
+    }
+
+    #topbar h1 span {
+      font-size: 0.7rem;
+      color: #888;
+      font-weight: 400;
+      display: block;
+      letter-spacing: 0.12em;
+    }
+
+    #date-input {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      color: #e0e0e0;
+      padding: 6px 10px;
+      font-size: 0.85rem;
+      outline: none;
+      cursor: pointer;
+    }
+    #date-input::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
+
+    .btn {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 6px;
+      color: #e0e0e0;
+      padding: 6px 12px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover { background: rgba(255,255,255,0.2); }
+    .btn.active { background: rgba(255,215,0,0.25); border-color: #ffd700; color: #ffd700; }
+
+    #status {
+      font-size: 0.75rem;
+      color: #888;
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    /* ── planet legend / info panel ── */
+    #legend {
+      position: fixed;
+      right: 14px;
+      top: 60px;
+      z-index: 10;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      padding: 10px 14px;
+      min-width: 160px;
+      font-size: 0.78rem;
+    }
+
+    #legend h3 { font-size: 0.7rem; color: #888; letter-spacing: 0.1em; margin-bottom: 8px; }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 0;
+      cursor: pointer;
+      border-radius: 4px;
+      padding: 3px 6px;
+      margin: 0 -6px;
+      transition: background 0.1s;
+    }
+    .legend-item:hover { background: rgba(255,255,255,0.08); }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .legend-name { flex: 1; }
+    .legend-dist { color: #666; font-size: 0.7rem; text-align: right; }
+
+    /* ── hover tooltip ── */
+    #tooltip {
+      position: fixed;
+      z-index: 20;
+      background: rgba(0,0,0,0.85);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.78rem;
+      pointer-events: none;
+      display: none;
+    }
+    #tooltip strong { display: block; margin-bottom: 4px; font-size: 0.85rem; }
+
+    /* ── loading overlay ── */
+    #loading {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      transition: opacity 0.4s;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    #loading p { color: #888; margin-top: 12px; font-size: 0.85rem; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid rgba(255,215,0,0.2);
+      border-top-color: #ffd700;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── controls hint ── */
+    #hint {
+      position: fixed;
+      bottom: 14px;
+      left: 14px;
+      font-size: 0.7rem;
+      color: #444;
+      z-index: 10;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading">
+  <div class="spinner"></div>
+  <p>Loading solar system…</p>
+</div>
+
+<!-- Three.js canvas -->
+<div id="canvas-container"></div>
+
+<!-- Top bar -->
+<div id="topbar">
+  <h1>SuryaMandal <span>सूर्यमण्डल</span></h1>
+  <input type="datetime-local" id="date-input" />
+  <button class="btn" id="btn-now">Now</button>
+  <button class="btn" id="btn-animate">▶ Animate</button>
+  <span id="status">Loading…</span>
+</div>
+
+<!-- Planet legend -->
+<div id="legend">
+  <h3>PLANETS</h3>
+  <div id="legend-items"></div>
+</div>
+
+<!-- Tooltip -->
+<div id="tooltip"></div>
+
+<!-- Controls hint -->
+<div id="hint">
+  Drag to rotate · Scroll to zoom · Right-drag to pan
+</div>
+
+<!-- Three.js via CDN (importmap) -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+// ── Scene setup ──────────────────────────────────────────────────────────────
+
+const container = document.getElementById('canvas-container');
+const W = () => window.innerWidth;
+const H = () => window.innerHeight;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000005);
+
+const camera = new THREE.PerspectiveCamera(50, W() / H(), 0.01, 10000);
+camera.position.set(0, 120, 280);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(W(), H());
+container.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(W(), H());
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0';
+labelRenderer.domElement.style.pointerEvents = 'none';
+container.appendChild(labelRenderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 5;
+controls.maxDistance = 1500;
+
+// Ambient + directional light (Sun glow)
+scene.add(new THREE.AmbientLight(0x111122, 2));
+const sunLight = new THREE.PointLight(0xfff8e1, 3, 2000, 0.5);
+scene.add(sunLight);
+
+// ── Starfield ────────────────────────────────────────────────────────────────
+
+function makeStarfield(count = 6000) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(count * 3);
+  for (let i = 0; i < count * 3; i++) {
+    pos[i] = (Math.random() - 0.5) * 4000;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.6, sizeAttenuation: true });
+  return new THREE.Points(geo, mat);
+}
+scene.add(makeStarfield());
+
+// ── Sun ──────────────────────────────────────────────────────────────────────
+
+const sunGeo = new THREE.SphereGeometry(4, 32, 32);
+const sunMat = new THREE.MeshStandardMaterial({
+  color: 0xffd700,
+  emissive: 0xffaa00,
+  emissiveIntensity: 1.5,
+  roughness: 0.4,
+});
+const sun = new THREE.Mesh(sunGeo, sunMat);
+scene.add(sun);
+
+// Sun glow sprite
+const glowTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(64,64,0,64,64,64);
+  g.addColorStop(0,   'rgba(255,200,50,0.8)');
+  g.addColorStop(0.3, 'rgba(255,160,0,0.3)');
+  g.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,128,128);
+  return new THREE.CanvasTexture(c);
+})();
+const glowMat = new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false });
+const glow = new THREE.Sprite(glowMat);
+glow.scale.set(40, 40, 1);
+scene.add(glow);
+
+// Sun label
+function makeLabel(text, color = '#ffffff') {
+  const div = document.createElement('div');
+  div.style.cssText = `
+    color: ${color}; font-size: 11px; font-family: system-ui, sans-serif;
+    padding: 2px 6px; background: rgba(0,0,0,0.5); border-radius: 4px;
+    pointer-events: none; white-space: nowrap;
+  `;
+  div.textContent = text;
+  return new CSS2DObject(div);
+}
+
+const sunLabel = makeLabel('Sun ☀', '#ffd700');
+sunLabel.position.set(0, 6, 0);
+sun.add(sunLabel);
+
+// ── Scale: 1 AU ≈ 80 Three.js units (compressed for outer planets) ───────────
+
+function auToUnits(au) {
+  // Compressed logarithmic scale so all planets are visible
+  if (au <= 0) return 0;
+  return 18 * Math.log1p(au * 2.5);
+}
+
+// ── Orbit rings ───────────────────────────────────────────────────────────────
+
+const orbitRings = {};
+
+function makeOrbitRing(radiusAU, color = 0x222244) {
+  const r = auToUnits(radiusAU);
+  const points = [];
+  const segs = 128;
+  for (let i = 0; i <= segs; i++) {
+    const a = (i / segs) * Math.PI * 2;
+    points.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(points);
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.25 });
+  return new THREE.Line(geo, mat);
+}
+
+// ── Planet meshes ─────────────────────────────────────────────────────────────
+
+const PLANET_SIZES = {
+  mercury: 0.8, venus: 1.4, earth: 1.5, mars: 1.1,
+  jupiter: 3.8, saturn: 3.2, uranus: 2.5, neptune: 2.4,
+};
+
+const planetMeshes = {};
+const planetLabels = {};
+const planetData = {};  // live position data from API
+
+function createPlanetMesh(name, color) {
+  const size = PLANET_SIZES[name] || 1.5;
+  const geo = new THREE.SphereGeometry(size, 24, 24);
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color),
+    roughness: 0.8,
+    metalness: 0.1,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+
+  // Saturn rings
+  if (name === 'saturn') {
+    const ringGeo = new THREE.RingGeometry(size * 1.4, size * 2.4, 64);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xe4d191, side: THREE.DoubleSide, transparent: true, opacity: 0.6,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2.5;
+    mesh.add(ring);
+  }
+
+  const label = makeLabel(name.charAt(0).toUpperCase() + name.slice(1), color);
+  label.position.set(0, size + 1.5, 0);
+  mesh.add(label);
+
+  planetMeshes[name] = mesh;
+  planetLabels[name] = label;
+  scene.add(mesh);
+  return mesh;
+}
+
+// ── Raycaster for hover ───────────────────────────────────────────────────────
+
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const tooltip = document.getElementById('tooltip');
+
+renderer.domElement.addEventListener('mousemove', (e) => {
+  mouse.x = (e.clientX / W()) * 2 - 1;
+  mouse.y = -(e.clientY / H()) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const meshes = Object.values(planetMeshes);
+  const hits = raycaster.intersectObjects(meshes);
+
+  if (hits.length > 0) {
+    const name = Object.keys(planetMeshes).find(k => planetMeshes[k] === hits[0].object);
+    const d = planetData[name];
+    if (name && d) {
+      const dist = Math.sqrt(d.x**2 + d.y**2 + d.z**2).toFixed(3);
+      tooltip.innerHTML = `
+        <strong style="color:${d.color}">${name.charAt(0).toUpperCase()+name.slice(1)}</strong>
+        Distance from Sun: <b>${dist} AU</b><br>
+        x: ${d.x.toFixed(4)} AU &nbsp; y: ${d.y.toFixed(4)} AU
+      `;
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.clientX + 14) + 'px';
+      tooltip.style.top  = (e.clientY - 10) + 'px';
+    }
+    renderer.domElement.style.cursor = 'pointer';
+  } else {
+    tooltip.style.display = 'none';
+    renderer.domElement.style.cursor = 'default';
+  }
+});
+
+// ── API fetch + scene update ──────────────────────────────────────────────────
+
+const statusEl = document.getElementById('status');
+const legendEl = document.getElementById('legend-items');
+
+async function fetchAndUpdate(dateStr) {
+  const url = dateStr ? `/api/positions?date=${encodeURIComponent(dateStr)}` : '/api/positions';
+  statusEl.textContent = 'Fetching positions…';
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const planets = data.planets;
+    legendEl.innerHTML = '';
+
+    for (const [name, info] of Object.entries(planets)) {
+      // Store live data
+      planetData[name] = info;
+
+      // Create mesh on first call
+      if (!planetMeshes[name]) {
+        createPlanetMesh(name, info.color);
+      }
+      if (!orbitRings[name]) {
+        const ring = makeOrbitRing(info.radius_au);
+        orbitRings[name] = ring;
+        scene.add(ring);
+      }
+
+      // Update position using log scale
+      const ux = auToUnits(Math.abs(info.x)) * Math.sign(info.x);
+      const uy = auToUnits(Math.abs(info.z)) * Math.sign(info.z) * 0.3; // tilt z→y for inclination
+      const uz = auToUnits(Math.abs(info.y)) * Math.sign(info.y);
+      planetMeshes[name].position.set(ux, uy, uz);
+
+      // Legend
+      const dist = Math.sqrt(info.x**2 + info.y**2 + info.z**2).toFixed(3);
+      const item = document.createElement('div');
+      item.className = 'legend-item';
+      item.innerHTML = `
+        <div class="legend-dot" style="background:${info.color}"></div>
+        <span class="legend-name">${name.charAt(0).toUpperCase()+name.slice(1)}</span>
+        <span class="legend-dist">${dist} AU</span>
+      `;
+      item.addEventListener('click', () => {
+        const mesh = planetMeshes[name];
+        if (mesh) {
+          const pos = mesh.position;
+          camera.position.set(pos.x + 20, pos.y + 15, pos.z + 20);
+          controls.target.copy(pos);
+          controls.update();
+        }
+      });
+      legendEl.appendChild(item);
+    }
+
+    const d = new Date(data.date);
+    statusEl.textContent = d.toUTCString();
+    document.getElementById('loading').classList.add('hidden');
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+    console.error(err);
+  }
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+
+const dateInput = document.getElementById('date-input');
+
+// Set input to now (local time)
+function setInputToNow() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  dateInput.value = local.toISOString().slice(0, 16);
+}
+setInputToNow();
+
+document.getElementById('btn-now').addEventListener('click', () => {
+  setInputToNow();
+  fetchAndUpdate(null);
+});
+
+dateInput.addEventListener('change', () => {
+  const val = dateInput.value;
+  if (val) fetchAndUpdate(val + ':00Z');
+});
+
+// Animation (step through time)
+let animating = false;
+let animDate = new Date();
+const btnAnimate = document.getElementById('btn-animate');
+
+btnAnimate.addEventListener('click', () => {
+  animating = !animating;
+  btnAnimate.textContent = animating ? '⏸ Pause' : '▶ Animate';
+  btnAnimate.classList.toggle('active', animating);
+  if (animating) {
+    animDate = dateInput.value ? new Date(dateInput.value + 'Z') : new Date();
+    animLoop();
+  }
+});
+
+let lastAnimFetch = 0;
+function animLoop() {
+  if (!animating) return;
+  animDate = new Date(animDate.getTime() + 86400000); // +1 day per frame
+  const iso = animDate.toISOString().slice(0, 16);
+  dateInput.value = iso;
+  const now = Date.now();
+  if (now - lastAnimFetch > 600) { // throttle API calls
+    lastAnimFetch = now;
+    fetchAndUpdate(animDate.toISOString());
+  }
+  requestAnimationFrame(animLoop);
+}
+
+// ── Render loop ───────────────────────────────────────────────────────────────
+
+sun.rotation.y += 0.0;
+function animate() {
+  requestAnimationFrame(animate);
+  sun.rotation.y += 0.003;
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = W() / H();
+  camera.updateProjectionMatrix();
+  renderer.setSize(W(), H());
+  labelRenderer.setSize(W(), H());
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+fetchAndUpdate(null);
+animate();
+</script>
+</body>
+</html>
