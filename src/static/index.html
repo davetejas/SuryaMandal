@@ -321,7 +321,7 @@ function auToUnits(au) {
 
 const orbitRings = {};
 
-function makeOrbitRing(radiusAU, color = 0x222244) {
+function makeOrbitRing(radiusAU, color = 0x222244, opacity = 0.3) {
   const r = auToUnits(radiusAU);
   const points = [];
   const segs = 128;
@@ -330,8 +330,59 @@ function makeOrbitRing(radiusAU, color = 0x222244) {
     points.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
   }
   const geo = new THREE.BufferGeometry().setFromPoints(points);
-  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.25 });
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
   return new THREE.Line(geo, mat);
+}
+
+// ── Moon (orbits Earth — rendered at fixed visual scale, not AU scale) ────────
+
+const MOON_VISUAL_RADIUS = 8; // Three.js units around Earth mesh
+const moonGroup = new THREE.Group(); // parented to scene, repositioned to Earth each update
+scene.add(moonGroup);
+let moonMesh = null;
+let moonOrbitRing = null;
+
+function initMoon(color) {
+  const geo = new THREE.SphereGeometry(0.45, 16, 16);
+  const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.95 });
+  moonMesh = new THREE.Mesh(geo, mat);
+  const label = makeLabel('Moon', color);
+  label.position.set(0, 1.2, 0);
+  moonMesh.add(label);
+  moonGroup.add(moonMesh);
+
+  // Orbit ring around Earth at fixed visual radius
+  const pts = [];
+  for (let i = 0; i <= 128; i++) {
+    const a = (i / 128) * Math.PI * 2;
+    pts.push(new THREE.Vector3(Math.cos(a) * MOON_VISUAL_RADIUS, 0, Math.sin(a) * MOON_VISUAL_RADIUS));
+  }
+  const rGeo = new THREE.BufferGeometry().setFromPoints(pts);
+  const rMat = new THREE.LineBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity: 0.3 });
+  moonOrbitRing = new THREE.Line(rGeo, rMat);
+  moonGroup.add(moonOrbitRing);
+
+  planetMeshes['moon'] = moonMesh; // register for raycaster + legend click
+}
+
+function updateMoon(moonInfo, earthInfo, earthScenePos) {
+  if (!moonMesh) initMoon(moonInfo.color);
+
+  // Move the whole moon group to sit at Earth's scene position
+  moonGroup.position.copy(earthScenePos);
+
+  // Geocentric direction vector (Moon relative to Earth in AU)
+  const dx = moonInfo.x - earthInfo.x;
+  const dy = moonInfo.y - earthInfo.y;
+  const dz = moonInfo.z - earthInfo.z;
+  const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+
+  // Scale direction to fixed visual radius
+  moonMesh.position.set(
+    (dx / dist) * MOON_VISUAL_RADIUS,
+    (dy / dist) * MOON_VISUAL_RADIUS * 0.3,
+    (dz / dist) * MOON_VISUAL_RADIUS,
+  );
 }
 
 // ── Planet meshes ─────────────────────────────────────────────────────────────
@@ -394,10 +445,18 @@ renderer.domElement.addEventListener('mousemove', (e) => {
     const name = Object.keys(planetMeshes).find(k => planetMeshes[k] === hits[0].object);
     const d = planetData[name];
     if (name && d) {
-      const dist = Math.sqrt(d.x**2 + d.y**2 + d.z**2).toFixed(3);
+      let distLine;
+      if (name === 'moon' && planetData.earth) {
+        const dx = d.x - planetData.earth.x, dy = d.y - planetData.earth.y, dz = d.z - planetData.earth.z;
+        const km = Math.round(Math.sqrt(dx**2+dy**2+dz**2) * 149597870.7);
+        distLine = `Distance from Earth: <b>${km.toLocaleString()} km</b>`;
+      } else {
+        const dist = Math.sqrt(d.x**2 + d.y**2 + d.z**2).toFixed(3);
+        distLine = `Distance from Sun: <b>${dist} AU</b>`;
+      }
       tooltip.innerHTML = `
         <strong style="color:${d.color}">${name.charAt(0).toUpperCase()+name.slice(1)}</strong>
-        Distance from Sun: <b>${dist} AU</b><br>
+        ${distLine}<br>
         x: ${d.x.toFixed(4)} AU &nbsp; y: ${d.y.toFixed(4)} AU
       `;
       tooltip.style.display = 'block';
@@ -432,12 +491,16 @@ async function fetchAndUpdate(dateStr) {
       // Store live data
       planetData[name] = info;
 
+      // Moon orbits Earth — handled separately below
+      if (name === 'moon') continue;
+
       // Create mesh on first call
       if (!planetMeshes[name]) {
         createPlanetMesh(name, info.color);
       }
       if (!orbitRings[name]) {
-        const ring = makeOrbitRing(info.radius_au);
+        const colorHex = parseInt(info.color.replace('#', ''), 16);
+        const ring = makeOrbitRing(info.radius_au, colorHex);
         orbitRings[name] = ring;
         scene.add(ring);
       }
@@ -467,6 +530,31 @@ async function fetchAndUpdate(dateStr) {
         }
       });
       legendEl.appendChild(item);
+    }
+
+    // Moon: position relative to Earth at fixed visual scale
+    if (planets.moon && planets.earth && planetMeshes.earth) {
+      updateMoon(planets.moon, planets.earth, planetMeshes.earth.position);
+
+      // Moon legend entry (distance from Earth in km)
+      const dx = planets.moon.x - planets.earth.x;
+      const dy = planets.moon.y - planets.earth.y;
+      const dz = planets.moon.z - planets.earth.z;
+      const distKm = Math.round(Math.sqrt(dx**2 + dy**2 + dz**2) * 149597870.7);
+      const moonItem = document.createElement('div');
+      moonItem.className = 'legend-item';
+      moonItem.innerHTML = `
+        <div class="legend-dot" style="background:${planets.moon.color}"></div>
+        <span class="legend-name">Moon</span>
+        <span class="legend-dist">${distKm.toLocaleString()} km</span>
+      `;
+      moonItem.addEventListener('click', () => {
+        const pos = moonGroup.position.clone().add(moonMesh.position);
+        camera.position.set(pos.x + 8, pos.y + 6, pos.z + 8);
+        controls.target.copy(pos);
+        controls.update();
+      });
+      legendEl.appendChild(moonItem);
     }
 
     const d = new Date(data.date);
